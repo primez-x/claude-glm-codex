@@ -1,0 +1,60 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/YOU/.claude/hooks/plan-mode-guard.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/YOU/.claude/hooks/plan-file-mirror.py"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/YOU/.claude/hooks/plan-gap-goal-hook.py",
+            "timeout": 5,
+            "statusMessage": "Checking plan gap objective"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/YOU/.claude/hooks/plan-mode-context-hook.py",
+            "timeout": 5,
+            "statusMessage": "Loading plan mode contract"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/YOU/.claude/hooks/plan-gap-stop-hook.py",
+            "timeout": 10,
+            "statusMessage": "Checking plan gap goal"
+          }
+        ]
+      }
+    ]
+  }
+}

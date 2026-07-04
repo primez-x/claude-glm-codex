@@ -1,0 +1,355 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
+
+skip_tmux=0
+force_new_tmux=0
+claude_glm_codex_args=()
+while (($#)); do
+  case "$1" in
+    --no-tmux)
+      skip_tmux=1
+      shift
+      ;;
+    --new-tmux)
+      force_new_tmux=1
+      shift
+      ;;
+    *)
+      claude_glm_codex_args+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${claude_glm_codex_args[@]}"
+
+case "${1:-}" in
+  -h|--help|-v|--version)
+    exec claude "$@"
+    ;;
+esac
+
+env_file="${CLAUDE_GLM_CODEX_ENV_FILE:-${CLAUDE_GLM_ENV_FILE:-$HOME/.config/claude-glm/env}}"
+if [[ ! -f "$env_file" ]]; then
+  printf 'Missing Claude-GLM env file: %s\n' "$env_file" >&2
+  exit 2
+fi
+# shellcheck source=/dev/null
+source "$env_file"
+
+glm_opus_model="${ANTHROPIC_DEFAULT_OPUS_MODEL:-glm-5.2[1m]}"
+glm_opus_provider_model="${CLAUDE_GLM_CODEX_UPSTREAM_OPUS_MODEL:-$glm_opus_model}"
+glm_opus_provider_model="${glm_opus_provider_model#anthropic/}"
+if [[ "$glm_opus_provider_model" == *'[1m]' ]]; then
+  glm_opus_provider_model="${glm_opus_provider_model:0:${#glm_opus_provider_model}-4}"
+fi
+
+if [[ -z "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+  printf 'Missing ANTHROPIC_AUTH_TOKEN in %s\n' "$env_file" >&2
+  exit 2
+fi
+if [[ -z "${ANTHROPIC_BASE_URL:-}" ]]; then
+  printf 'Missing ANTHROPIC_BASE_URL in %s\n' "$env_file" >&2
+  exit 2
+fi
+
+export CLAUDE_GLM_UPSTREAM_AUTH_TOKEN="$ANTHROPIC_AUTH_TOKEN"
+export CLAUDE_GLM_UPSTREAM_BASE_URL="$ANTHROPIC_BASE_URL"
+export CLAUDE_GLM_UPSTREAM_OPUS_MODEL="anthropic/${glm_opus_provider_model}"
+unset ANTHROPIC_API_KEY
+
+prompt_file="${CLAUDE_GLM_CODEX_SYSTEM_PROMPT_FILE:-$HOME/.claude/prompts/fable-provider-native-system-glm-codex.md}"
+if [[ ! -f "$prompt_file" ]]; then
+  printf 'Missing Claude-GLM system prompt file: %s\n' "$prompt_file" >&2
+  exit 2
+fi
+
+tmux_session_prefix="${CLAUDE_GLM_CODEX_TMUX_SESSION_PREFIX:-claude-glm-codex}"
+
+tmux_session_part() {
+  local value="${1:-session}"
+  value="${value//[^[:alnum:]_.-]/-}"
+  value="${value#-}"
+  value="${value%-}"
+  printf '%s' "${value:-session}"
+}
+
+script_path="${BASH_SOURCE[0]}"
+if command -v realpath >/dev/null 2>&1; then
+  script_path="$(realpath "$script_path")"
+fi
+
+session_matches_claude_glm_codex() {
+  local session_name="$1"
+  local pane_command="$2"
+  local pane_tty="$3"
+  local process_args
+
+  if [[ "$session_name" == "$tmux_session_prefix"* ]]; then
+    return 0
+  fi
+
+  if [[ "$pane_command" != "claude" && "$pane_command" != "node" ]]; then
+    return 1
+  fi
+
+  process_args="$(ps -t "$pane_tty" -o args= 2>/dev/null || true)"
+  [[ "$process_args" == *"--system-prompt-file"* && "$process_args" == *"$prompt_file"* && "$process_args" == *"--model opus"* ]]
+}
+
+collect_claude_glm_codex_sessions() {
+  local session_name attached windows pane_command pane_path pane_tty
+  declare -A seen_sessions=()
+  claude_glm_codex_tmux_sessions=()
+
+  while IFS='|' read -r session_name attached windows pane_command pane_path pane_tty; do
+    [[ -n "${session_name:-}" ]] || continue
+    [[ -z "${seen_sessions[$session_name]:-}" ]] || continue
+    if session_matches_claude_glm_codex "$session_name" "$pane_command" "$pane_tty"; then
+      seen_sessions["$session_name"]=1
+      claude_glm_codex_tmux_sessions+=(
+        "${session_name}"$'\t'"${attached}"$'\t'"${windows}"$'\t'"${pane_command}"$'\t'"${pane_path}"
+      )
+    fi
+  done < <(tmux list-panes -a -F '#{session_name}|#{session_attached}|#{session_windows}|#{pane_current_command}|#{pane_current_path}|#{pane_tty}' 2>/dev/null || true)
+}
+
+attach_tmux_session() {
+  local entry="$1"
+  local session_name
+  IFS=$'\t' read -r session_name _ <<<"$entry"
+  exec tmux attach-session -t "$session_name"
+}
+
+start_tmux_session() {
+  local cwd_slug stamp session_name command_text
+  local command_parts
+  cwd_slug="$(tmux_session_part "$(basename "$PWD")")"
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  session_name="${tmux_session_prefix}-${cwd_slug}-${stamp}"
+  while tmux has-session -t "$session_name" 2>/dev/null; do
+    session_name="${tmux_session_prefix}-${cwd_slug}-${stamp}-${RANDOM}"
+  done
+
+  command_parts=(env "HOME=$HOME" "CLAUDE_GLM_CODEX_TMUX_SESSION=$session_name")
+  if [[ -n "${CLAUDE_GLM_CODEX_ENV_FILE:-}" ]]; then
+    command_parts+=("CLAUDE_GLM_CODEX_ENV_FILE=$CLAUDE_GLM_CODEX_ENV_FILE")
+  elif [[ -n "${CLAUDE_GLM_ENV_FILE:-}" ]]; then
+    command_parts+=("CLAUDE_GLM_ENV_FILE=$CLAUDE_GLM_ENV_FILE")
+  fi
+  if [[ -n "${CLAUDE_GLM_CODEX_SYSTEM_PROMPT_FILE:-}" ]]; then
+    command_parts+=("CLAUDE_GLM_CODEX_SYSTEM_PROMPT_FILE=$CLAUDE_GLM_CODEX_SYSTEM_PROMPT_FILE")
+  fi
+  command_parts+=("$script_path" --no-tmux "$@")
+  printf -v command_text '%q ' "${command_parts[@]}"
+  command_text="${command_text% }"
+  exec tmux new-session -s "$session_name" -c "$PWD" "$command_text"
+}
+
+prompt_for_tmux_session() {
+  local count="$1"
+  local index entry session_name attached windows pane_command pane_path state choice
+  shift
+
+  printf 'Existing Claude-GLM-Codex tmux sessions:\n' >&2
+  for index in "${!claude_glm_codex_tmux_sessions[@]}"; do
+    entry="${claude_glm_codex_tmux_sessions[$index]}"
+    IFS=$'\t' read -r session_name attached windows pane_command pane_path <<<"$entry"
+    if [[ "${attached:-0}" == "0" ]]; then
+      state="detached"
+    else
+      state="attached:${attached}"
+    fi
+    printf '  %d) %s [%s, %s window(s), %s, %s]\n' \
+      "$((index + 1))" "$session_name" "$state" "${windows:-?}" "${pane_command:-?}" "${pane_path:-?}" >&2
+  done
+  printf '  n) start a new Claude-GLM-Codex tmux session\n' >&2
+
+  while true; do
+    if ((count == 1)); then
+      printf 'Attach/continue session 1 or start new [n]: ' >&2
+    else
+      printf 'Attach/continue session 1-%d or start new [n]: ' "$count" >&2
+    fi
+    IFS= read -r choice
+    case "$choice" in
+      ""|n|N|new|NEW)
+        start_tmux_session "$@"
+        ;;
+      q|Q|quit|QUIT)
+        exit 0
+        ;;
+      *[!0-9]*)
+        printf 'Enter a number, n, or q.\n' >&2
+        ;;
+      *)
+        if ((choice >= 1 && choice <= count)); then
+          attach_tmux_session "${claude_glm_codex_tmux_sessions[$((choice - 1))]}"
+        fi
+        printf 'Enter a number from 1 to %d, n, or q.\n' "$count" >&2
+        ;;
+    esac
+  done
+}
+
+should_use_tmux() {
+  [[ "$skip_tmux" == "0" ]] || return 1
+  [[ "${CLAUDE_GLM_CODEX_NO_TMUX:-}" != "1" ]] || return 1
+  [[ "${CLAUDE_GLM_CODEX_TMUX:-}" != "0" ]] || return 1
+  [[ -z "${TMUX:-}" ]] || return 1
+  [[ -t 0 && -t 1 ]] || return 1
+  command -v tmux >/dev/null 2>&1 || return 1
+  return 0
+}
+
+if should_use_tmux; then
+  declare -a claude_glm_codex_tmux_sessions
+  collect_claude_glm_codex_sessions
+  if ((force_new_tmux == 0)); then
+    if ((${#claude_glm_codex_tmux_sessions[@]} >= 1)); then
+      prompt_for_tmux_session "${#claude_glm_codex_tmux_sessions[@]}" "$@"
+    fi
+  fi
+  start_tmux_session "$@"
+fi
+
+has_model=0
+has_skip_permissions=0
+has_system_prompt=0
+has_agents=0
+has_effort=0
+default_model="${CLAUDE_GLM_CODEX_DEFAULT_MODEL:-opus}"
+selected_model="$default_model"
+effective_effort="${CLAUDE_GLM_CODEX_EFFORT:-xhigh}"
+normalized_args=()
+
+normalize_effort() {
+  local value="${1,,}"
+  case "$value" in
+    low|medium|high|xhigh)
+      printf '%s\n' "$value"
+      ;;
+    max)
+      printf 'xhigh\n'
+      ;;
+    *)
+      printf 'Unsupported effort level: %s\n' "$1" >&2
+      return 1
+      ;;
+  esac
+}
+
+while (($#)); do
+  case "$1" in
+    --model)
+      if (($# < 2)); then
+        printf 'Missing value after --model\n' >&2
+        exit 2
+      fi
+      has_model=1
+      selected_model="$2"
+      normalized_args+=(--model "$2")
+      shift 2
+      ;;
+    --model=*)
+      has_model=1
+      selected_model="${1#--model=}"
+      normalized_args+=("$1")
+      shift
+      ;;
+    --dangerously-skip-permissions) has_skip_permissions=1; normalized_args+=("$1"); shift ;;
+    --system-prompt|--system-prompt=*|--system-prompt-file|--system-prompt-file=*) has_system_prompt=1; normalized_args+=("$1"); shift ;;
+    --agents|--agents=*) has_agents=1; normalized_args+=("$1"); shift ;;
+    --effort)
+      if (($# < 2)); then
+        printf 'Missing value after --effort\n' >&2
+        exit 2
+      fi
+      has_effort=1
+      effective_effort="$(normalize_effort "$2")"
+      normalized_args+=(--effort "$effective_effort")
+      shift 2
+      ;;
+    --effort=*)
+      has_effort=1
+      effective_effort="$(normalize_effort "${1#--effort=}")"
+      normalized_args+=("--effort=$effective_effort")
+      shift
+      ;;
+    *)
+      normalized_args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+set -- "${normalized_args[@]}"
+
+claude_args=()
+if [[ "$has_system_prompt" == "0" ]]; then
+  claude_args+=(--system-prompt-file "$prompt_file")
+fi
+subagent_prompt_file="${CLAUDE_GLM_CODEX_SUBAGENT_PROMPT_FILE:-$HOME/.claude/prompts/claude-glm-codex-subagents.md}"
+if [[ "${CLAUDE_GLM_CODEX_SUBAGENT_PROMPT:-1}" != "0" ]]; then
+  if [[ ! -f "$subagent_prompt_file" ]]; then
+    printf 'Missing Claude-GLM-Codex subagent prompt file: %s\n' "$subagent_prompt_file" >&2
+    exit 2
+  fi
+  claude_args+=(--append-system-prompt "$(<"$subagent_prompt_file")")
+fi
+agents_file="${CLAUDE_GLM_CODEX_AGENTS_FILE:-$HOME/.config/claude-glm-codex/agents.json}"
+if [[ "$has_agents" == "0" && "${CLAUDE_GLM_CODEX_SESSION_AGENTS:-1}" != "0" ]]; then
+  if [[ ! -f "$agents_file" ]]; then
+    printf 'Missing Claude-GLM-Codex agents file: %s\n' "$agents_file" >&2
+    exit 2
+  fi
+  claude_args+=(--agents "$(<"$agents_file")")
+fi
+if [[ "$has_skip_permissions" == "0" ]]; then
+  claude_args+=(--dangerously-skip-permissions)
+fi
+if [[ "$has_model" == "0" ]]; then
+  claude_args+=(--model "$default_model")
+fi
+if [[ "$has_effort" == "0" ]]; then
+  claude_args+=(--effort "$effective_effort")
+fi
+claude_args+=("$@")
+
+export CLAUDE_GATEWAY_CONFIG="${CLAUDE_GATEWAY_CONFIG:-$HOME/.config/litellm/claude-glm-codex.yaml}"
+export CLAUDE_GATEWAY_MODEL="${CLAUDE_GATEWAY_MODEL:-$selected_model}"
+export CLAUDE_GATEWAY_SMALL_FAST_MODEL="${CLAUDE_GATEWAY_SMALL_FAST_MODEL:-${CLAUDE_GLM_CODEX_SMALL_FAST_MODEL:-gpt-5.3-codex-spark}}"
+export CLAUDE_GATEWAY_HOST="${CLAUDE_GATEWAY_HOST:-127.0.0.1}"
+export CLAUDE_GLM_CODEX_REASONING_EFFORT="$effective_effort"
+export CLAUDE_CODE_EFFORT_LEVEL="${CLAUDE_CODE_EFFORT_LEVEL:-$effective_effort}"
+export CLAUDE_CODE_ALWAYS_ENABLE_EFFORT="${CLAUDE_CODE_ALWAYS_ENABLE_EFFORT:-1}"
+export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY="${CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY:-1}"
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-1000000}"
+export CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL="${CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL:-1}"
+export CLAUDE_CODE_DISABLE_ADVISOR_TOOL="${CLAUDE_CODE_DISABLE_ADVISOR_TOOL:-${CLAUDE_GLM_CODEX_DISABLE_NATIVE_ADVISOR:-0}}"
+export CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL:-${CLAUDE_GLM_CODEX_SUBAGENT_MODEL:-inherit}}"
+export CLAUDE_CODE_BG_CLASSIFIER_MODEL="${CLAUDE_CODE_BG_CLASSIFIER_MODEL:-${CLAUDE_GLM_CODEX_INTERNAL_MODEL:-haiku}}"
+export CLAUDE_CODE_AUTO_MODE_MODEL="${CLAUDE_CODE_AUTO_MODE_MODEL:-${CLAUDE_GLM_CODEX_INTERNAL_MODEL:-haiku}}"
+
+export ANTHROPIC_DEFAULT_OPUS_MODEL="${CLAUDE_GLM_CODEX_OPUS_MODEL:-$glm_opus_model}"
+export ANTHROPIC_DEFAULT_OPUS_MODEL_NAME="${CLAUDE_GLM_CODEX_OPUS_MODEL_NAME:-GLM-5.2}"
+export ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION="${CLAUDE_GLM_CODEX_OPUS_MODEL_DESCRIPTION:-Opus/advisor/plan route to GLM-5.2 through LiteLLM}"
+
+export ANTHROPIC_DEFAULT_FABLE_MODEL="${CLAUDE_GLM_CODEX_FABLE_MODEL:-glm-codex-hybrid}"
+export ANTHROPIC_DEFAULT_FABLE_MODEL_NAME="${CLAUDE_GLM_CODEX_FABLE_MODEL_NAME:-GLM-Codex Smart Advisor}"
+export ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION="${CLAUDE_GLM_CODEX_FABLE_MODEL_DESCRIPTION:-Advisor route that uses GPT-5.5 against GLM executors and GLM against GPT/Spark executors}"
+export ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES="${CLAUDE_GLM_CODEX_FABLE_MODEL_SUPPORTED_CAPABILITIES:-effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking}"
+
+export ANTHROPIC_DEFAULT_SONNET_MODEL="${CLAUDE_GLM_CODEX_SONNET_MODEL:-gpt-5.5}"
+export ANTHROPIC_DEFAULT_SONNET_MODEL_NAME="${CLAUDE_GLM_CODEX_SONNET_MODEL_NAME:-GPT-5.5}"
+export ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION="${CLAUDE_GLM_CODEX_SONNET_MODEL_DESCRIPTION:-Sonnet-equivalent Codex delegation route through LiteLLM}"
+export ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES="${CLAUDE_GLM_CODEX_SONNET_MODEL_SUPPORTED_CAPABILITIES:-effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking}"
+
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="${CLAUDE_GLM_CODEX_HAIKU_MODEL:-gpt-5.3-codex-spark}"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME="${CLAUDE_GLM_CODEX_HAIKU_MODEL_NAME:-GPT-5.3 Codex Spark}"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION="${CLAUDE_GLM_CODEX_HAIKU_MODEL_DESCRIPTION:-Haiku-equivalent Codex Spark route through LiteLLM}"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES="${CLAUDE_GLM_CODEX_HAIKU_MODEL_SUPPORTED_CAPABILITIES:-effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking}"
+
+export CLAUDE_GLM_CODEX_WRAPPER=1
+exec claude-glm-codex-litellm "${claude_args[@]}"

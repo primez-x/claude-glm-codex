@@ -1,0 +1,59 @@
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+*.env
+*.local
+
+# API keys, credentials, tokens, and private key material
+*auth*.json
+*token*
+*secret*
+*credential*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Claude, Codex, GLM, and LiteLLM local runtime state
+.claude/
+.codex/
+.config/litellm/chatgpt/
+.config/claude-glm/env
+claude.json
+.claude.json
+sessions/
+transcripts/
+*.jsonl
+
+# Logs, process files, and local runtime output
+logs/
+*.log
+*.pid
+*.sock
+*.tmp
+tmp/
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node/package-manager local state
+node_modules/
+.npm/
+.pnpm-store/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

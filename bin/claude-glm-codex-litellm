@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
+
+CONFIG="${CLAUDE_GATEWAY_CONFIG:-$HOME/.config/litellm/claude-glm-codex.yaml}"
+HOST="${CLAUDE_GATEWAY_HOST:-127.0.0.1}"
+MODEL="${CLAUDE_GATEWAY_MODEL:-glm-5.2[1m]}"
+SMALL_MODEL="${CLAUDE_GATEWAY_SMALL_FAST_MODEL:-gpt-5.5}"
+AUTH_TOKEN="${CLAUDE_GLM_CODEX_LOCAL_AUTH_TOKEN:-local-litellm-dev-token}"
+EFFORT="${CLAUDE_GLM_CODEX_REASONING_EFFORT:-xhigh}"
+BASE_PORT="${CLAUDE_GLM_CODEX_PORT_BASE:-4015}"
+
+case "$EFFORT" in
+  low) effort_port_offset=0 ;;
+  medium) effort_port_offset=1 ;;
+  high) effort_port_offset=2 ;;
+  xhigh) effort_port_offset=3 ;;
+  max)
+    EFFORT=xhigh
+    export CLAUDE_GLM_CODEX_REASONING_EFFORT=xhigh
+    effort_port_offset=3
+    ;;
+  *)
+    printf 'Unsupported CLAUDE_GLM_CODEX_REASONING_EFFORT: %s\n' "$EFFORT" >&2
+    exit 2
+    ;;
+esac
+
+PORT="${CLAUDE_GATEWAY_PORT:-$((BASE_PORT + effort_port_offset))}"
+LOG_FILE="${CLAUDE_GATEWAY_LOG:-/tmp/claude-glm-codex-litellm-${PORT}.log}"
+BASE_URL="http://${HOST}:${PORT}"
+
+case "${1:-}" in
+  -h|--help|-v|--version)
+    exec claude "$@"
+    ;;
+esac
+
+require_command() {
+  local name="$1"
+  if ! command -v "$name" >/dev/null 2>&1; then
+    printf 'Missing required command: %s\n' "$name" >&2
+    exit 2
+  fi
+}
+
+find_litellm() {
+  if [[ -n "${LITELLM_BIN:-}" ]]; then
+    printf '%s\n' "$LITELLM_BIN"
+    return 0
+  fi
+  if command -v litellm >/dev/null 2>&1; then
+    command -v litellm
+    return 0
+  fi
+  if [[ -x "$HOME/.local/share/uv/tools/litellm/bin/litellm" ]]; then
+    printf '%s\n' "$HOME/.local/share/uv/tools/litellm/bin/litellm"
+    return 0
+  fi
+  if [[ -x "$HOME/titan/venv_linux/bin/litellm" ]]; then
+    printf '%s\n' "$HOME/titan/venv_linux/bin/litellm"
+    return 0
+  fi
+  return 1
+}
+
+get_litellm_pid() {
+  pgrep -f "litellm.*--port ${PORT}" | head -n 1 || true
+}
+
+litellm_runtime_newer_than_process() {
+  local pid="$1"
+  local runtime_mtime proc_mtime runtime_file runtime_file_mtime
+
+  [[ -n "$pid" && -e "/proc/$pid" && -f "$CONFIG" ]] || return 1
+  runtime_mtime=$(stat -c %Y "$CONFIG" 2>/dev/null) || return 1
+  for runtime_file in \
+    "$HOME/.local/share/claude-glm-codex/sitecustomize.py" \
+    "$HOME/.local/bin/claude-glm-codex" \
+    "${BASH_SOURCE[0]}"; do
+    if [[ -f "$runtime_file" ]]; then
+      runtime_file_mtime=$(stat -c %Y "$runtime_file" 2>/dev/null) || runtime_file_mtime=0
+      if [[ "$runtime_file_mtime" -gt "$runtime_mtime" ]]; then
+        runtime_mtime="$runtime_file_mtime"
+      fi
+    fi
+  done
+  proc_mtime=$(stat -c %Y "/proc/$pid" 2>/dev/null) || return 1
+
+  [[ "$runtime_mtime" -gt "$proc_mtime" ]]
+}
+
+sync_codex_chatgpt_auth() {
+  local codex_auth="$HOME/.codex/auth.json"
+  local token_dir="${CHATGPT_TOKEN_DIR:-$HOME/.config/litellm/chatgpt}"
+  local auth_file="${CHATGPT_AUTH_FILE:-auth.json}"
+
+  [[ "${CLAUDE_GLM_CODEX_SYNC_CODEX_AUTH:-${CLAUDE_CODEX_SYNC_CODEX_AUTH:-1}}" == "1" ]] || return 0
+  [[ -f "$codex_auth" ]] || return 0
+
+  CODEX_AUTH_FILE="$codex_auth" CHATGPT_TOKEN_DIR="$token_dir" CHATGPT_AUTH_FILE="$auth_file" python3 <<'PY'
+import base64
+import json
+import os
+import time
+from pathlib import Path
+
+codex_auth = Path(os.environ["CODEX_AUTH_FILE"])
+target_dir = Path(os.environ["CHATGPT_TOKEN_DIR"]).expanduser()
+target = target_dir / os.environ["CHATGPT_AUTH_FILE"]
+
+
+def jwt_exp(token):
+    parts = str(token).split(".")
+    if len(parts) < 2:
+        return None
+    payload = parts[1] + "=" * (-len(parts[1]) % 4)
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return None
+    exp = claims.get("exp")
+    return exp if isinstance(exp, (int, float)) else None
+
+
+def auth_record_is_fresh(record):
+    if not isinstance(record, dict):
+        return False
+    access_token = record.get("access_token")
+    if not access_token:
+        return False
+    exp = record.get("expires_at") or jwt_exp(access_token)
+    return isinstance(exp, (int, float)) and exp > time.time() + 60
+
+
+try:
+    if target.exists() and auth_record_is_fresh(json.loads(target.read_text())):
+        target.chmod(0o600)
+        raise SystemExit(0)
+except SystemExit:
+    raise
+except Exception:
+    pass
+
+try:
+    source = json.loads(codex_auth.read_text())
+except Exception:
+    raise SystemExit(0)
+
+tokens = source.get("tokens") if isinstance(source, dict) else None
+if not isinstance(tokens, dict):
+    raise SystemExit(0)
+
+record = {}
+for key in ("access_token", "refresh_token", "id_token", "account_id"):
+    value = tokens.get(key)
+    if value:
+        record[key] = value
+
+expires_at = jwt_exp(record.get("access_token"))
+if expires_at:
+    record["expires_at"] = expires_at
+
+if "access_token" not in record and "refresh_token" not in record:
+    raise SystemExit(0)
+
+target_dir.mkdir(parents=True, exist_ok=True)
+target.write_text(json.dumps(record))
+target.chmod(0o600)
+PY
+}
+
+claude_args=("$@")
+
+require_command claude
+require_command curl
+require_command pgrep
+require_command python3
+
+LITELLM_BIN="$(find_litellm || true)"
+if [[ -z "$LITELLM_BIN" ]]; then
+  printf 'Missing required command: litellm\n' >&2
+  printf 'Install it with: uv tool install "litellm[proxy]"\n' >&2
+  exit 2
+fi
+
+if [[ ! -f "$CONFIG" ]]; then
+  printf 'Missing LiteLLM config: %s\n' "$CONFIG" >&2
+  exit 2
+fi
+
+if [[ -z "${CLAUDE_GLM_UPSTREAM_OPUS_MODEL:-}" ]]; then
+  printf 'Missing CLAUDE_GLM_UPSTREAM_OPUS_MODEL. Launch through claude-glm-codex.\n' >&2
+  exit 2
+fi
+if [[ -z "${CLAUDE_GLM_UPSTREAM_BASE_URL:-}" ]]; then
+  printf 'Missing CLAUDE_GLM_UPSTREAM_BASE_URL. Launch through claude-glm-codex.\n' >&2
+  exit 2
+fi
+if [[ -z "${CLAUDE_GLM_UPSTREAM_AUTH_TOKEN:-}" ]]; then
+  printf 'Missing CLAUDE_GLM_UPSTREAM_AUTH_TOKEN. Launch through claude-glm-codex.\n' >&2
+  exit 2
+fi
+
+sync_codex_chatgpt_auth
+
+existing_pid=$(get_litellm_pid)
+if [[ -n "$existing_pid" ]] && litellm_runtime_newer_than_process "$existing_pid"; then
+  printf 'Replacing stale LiteLLM (PID %s) because hybrid gateway runtime changed.\n' "$existing_pid" >&2
+  kill "$existing_pid" 2>/dev/null || true
+  sleep 1
+fi
+
+export LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES="${LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES:-true}"
+
+started_pid=""
+if curl -sf "${BASE_URL}/health/liveliness" >/dev/null 2>&1 || curl -sf "${BASE_URL}/health" >/dev/null 2>&1; then
+  :
+else
+  PYTHONPATH="$HOME/.local/share/claude-glm-codex${PYTHONPATH:+:$PYTHONPATH}" \
+    "$LITELLM_BIN" --config "$CONFIG" --host "$HOST" --port "$PORT" >"$LOG_FILE" 2>&1 &
+  started_pid="$!"
+  for _ in $(seq 1 80); do
+    if curl -sf "${BASE_URL}/health/liveliness" >/dev/null 2>&1 || curl -sf "${BASE_URL}/health" >/dev/null 2>&1; then
+      break
+    fi
+    if ! kill -0 "$started_pid" 2>/dev/null; then
+      printf 'LiteLLM exited while starting. Log: %s\n' "$LOG_FILE" >&2
+      sed -n '1,180p' "$LOG_FILE" >&2 || true
+      exit 1
+    fi
+    sleep 0.25
+  done
+
+  if ! curl -sf "${BASE_URL}/health/liveliness" >/dev/null 2>&1 && ! curl -sf "${BASE_URL}/health" >/dev/null 2>&1; then
+    printf 'LiteLLM did not become healthy. Log: %s\n' "$LOG_FILE" >&2
+    sed -n '1,180p' "$LOG_FILE" >&2 || true
+    kill "$started_pid" 2>/dev/null || true
+    exit 1
+  fi
+fi
+
+cleanup() {
+  if [[ -n "$started_pid" ]]; then
+    kill "$started_pid" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+ANTHROPIC_BASE_URL="$BASE_URL" \
+ANTHROPIC_AUTH_TOKEN="$AUTH_TOKEN" \
+ANTHROPIC_MODEL="$MODEL" \
+ANTHROPIC_SMALL_FAST_MODEL="$SMALL_MODEL" \
+ANTHROPIC_API_KEY= \
+claude "${claude_args[@]}"

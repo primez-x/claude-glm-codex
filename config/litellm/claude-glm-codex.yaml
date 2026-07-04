@@ -1,0 +1,158 @@
+# LiteLLM model aliases for the local claude-glm-codex wrapper.
+# Secrets are read from the existing claude-glm env file by the launcher and
+# exported as CLAUDE_GLM_UPSTREAM_* variables before LiteLLM starts.
+
+model_list:
+  - model_name: glm-codex-hybrid
+    litellm_params:
+      model: os.environ/CLAUDE_GLM_UPSTREAM_OPUS_MODEL
+      api_base: os.environ/CLAUDE_GLM_UPSTREAM_BASE_URL
+      auth_token: os.environ/CLAUDE_GLM_UPSTREAM_AUTH_TOKEN
+    model_info:
+      mode: anthropic
+      max_input_tokens: 1000000
+
+  - model_name: fable
+    litellm_params:
+      model: os.environ/CLAUDE_GLM_UPSTREAM_OPUS_MODEL
+      api_base: os.environ/CLAUDE_GLM_UPSTREAM_BASE_URL
+      auth_token: os.environ/CLAUDE_GLM_UPSTREAM_AUTH_TOKEN
+    model_info:
+      mode: anthropic
+      max_input_tokens: 1000000
+      hidden: true
+      compatibility_alias_for: glm-codex-hybrid
+
+  - model_name: claude-fable-5
+    litellm_params:
+      model: os.environ/CLAUDE_GLM_UPSTREAM_OPUS_MODEL
+      api_base: os.environ/CLAUDE_GLM_UPSTREAM_BASE_URL
+      auth_token: os.environ/CLAUDE_GLM_UPSTREAM_AUTH_TOKEN
+    model_info:
+      mode: anthropic
+      max_input_tokens: 1000000
+      hidden: true
+      compatibility_alias_for: glm-codex-hybrid
+
+  - model_name: "claude-fable-5[1m]"
+    litellm_params:
+      model: os.environ/CLAUDE_GLM_UPSTREAM_OPUS_MODEL
+      api_base: os.environ/CLAUDE_GLM_UPSTREAM_BASE_URL
+      auth_token: os.environ/CLAUDE_GLM_UPSTREAM_AUTH_TOKEN
+    model_info:
+      mode: anthropic
+      max_input_tokens: 1000000
+      hidden: true
+      compatibility_alias_for: glm-codex-hybrid
+
+  - model_name: opus
+    litellm_params:
+      model: os.environ/CLAUDE_GLM_UPSTREAM_OPUS_MODEL
+      api_base: os.environ/CLAUDE_GLM_UPSTREAM_BASE_URL
+      auth_token: os.environ/CLAUDE_GLM_UPSTREAM_AUTH_TOKEN
+    model_info:
+      mode: anthropic
+      max_input_tokens: 1000000
+      hidden: true
+
+  - model_name: "glm-5.2[1m]"
+    litellm_params:
+      model: os.environ/CLAUDE_GLM_UPSTREAM_OPUS_MODEL
+      api_base: os.environ/CLAUDE_GLM_UPSTREAM_BASE_URL
+      auth_token: os.environ/CLAUDE_GLM_UPSTREAM_AUTH_TOKEN
+    model_info:
+      mode: anthropic
+      max_input_tokens: 1000000
+      hidden: true
+      compatibility_alias_for: opus
+
+  - model_name: glm-5.2
+    litellm_params:
+      model: os.environ/CLAUDE_GLM_UPSTREAM_OPUS_MODEL
+      api_base: os.environ/CLAUDE_GLM_UPSTREAM_BASE_URL
+      auth_token: os.environ/CLAUDE_GLM_UPSTREAM_AUTH_TOKEN
+    model_info:
+      mode: anthropic
+      max_input_tokens: 1000000
+      hidden: true
+      compatibility_alias_for: opus
+
+  - model_name: gpt-5.5
+    litellm_params:
+      model: chatgpt/gpt-5.5
+      reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT
+    model_info:
+      mode: responses
+      max_input_tokens: 272000
+
+  - model_name: gpt-5.5-sonnet-4-6
+    litellm_params:
+      model: chatgpt/gpt-5.5
+      reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT
+    model_info:
+      mode: responses
+      max_input_tokens: 272000
+      hidden: true
+      compatibility_alias_for: gpt-5.5
+
+  - model_name: "gpt-5.5-sonnet-4-6[1m]"
+    litellm_params:
+      model: chatgpt/gpt-5.5
+      reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT
+    model_info:
+      mode: responses
+      max_input_tokens: 272000
+      hidden: true
+      compatibility_alias_for: gpt-5.5
+
+  - model_name: sonnet
+    litellm_params:
+      model: chatgpt/gpt-5.5
+      reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT
+    model_info:
+      mode: responses
+      max_input_tokens: 272000
+      hidden: true
+      compatibility_alias_for: gpt-5.5
+
+  - model_name: gpt-5.3-codex-spark
+    litellm_params:
+      model: chatgpt/gpt-5.3-codex-spark
+      reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT
+    model_info:
+      mode: responses
+      max_input_tokens: 128000
+
+  - model_name: gpt-5.3-codex-spark-haiku
+    litellm_params:
+      model: chatgpt/gpt-5.3-codex-spark
+      reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT
+    model_info:
+      mode: responses
+      max_input_tokens: 128000
+      hidden: true
+      compatibility_alias_for: gpt-5.3-codex-spark
+
+  - model_name: gpt-5.3-codex-spark-sonnet-4-6
+    litellm_params:
+      model: chatgpt/gpt-5.3-codex-spark
+      reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT
+    model_info:
+      mode: responses
+      max_input_tokens: 128000
+      hidden: true
+      compatibility_alias_for: gpt-5.3-codex-spark
+
+  - model_name: haiku
+    litellm_params:
+      model: chatgpt/gpt-5.3-codex-spark
+      reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT
+    model_info:
+      mode: responses
+      max_input_tokens: 128000
+      hidden: true
+      compatibility_alias_for: gpt-5.3-codex-spark
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
