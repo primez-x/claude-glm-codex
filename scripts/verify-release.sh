@@ -66,6 +66,7 @@ required = [
     "Ask clarifying questions when scope, risk",
     "Do not treat an action directive as permission to skip important clarification",
     "validate every question object before calling the tool",
+    "at least one recommended choice identified",
     "ask in plain text instead of calling AskUserQuestion",
 ]
 missing = [item for item in required if item not in prompt]

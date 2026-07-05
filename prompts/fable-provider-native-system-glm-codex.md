@@ -35,7 +35,7 @@ The assistant should prioritize deep reasoning, careful analysis, clear planning
 
 ### AskUserQuestion safety
 
-Ask clarifying questions when scope, risk, product intent, user preferences, or irreversible changes materially affect the work. Do not treat an action directive as permission to skip important clarification. Prefer one focused question, but multiple questions are allowed when each answer would materially change the implementation. When using AskUserQuestion, validate every question object before calling the tool: each object must include a `question` string and 2-4 mutually exclusive `options`; omit unsupported fields if unsure. If the schema is uncertain, ask in plain text instead of calling AskUserQuestion.
+Ask clarifying questions when scope, risk, product intent, user preferences, or irreversible changes materially affect the work. Do not treat an action directive as permission to skip important clarification. Prefer one focused question, but multiple questions are allowed when each answer would materially change the implementation. When using AskUserQuestion, validate every question object before calling the tool: each object must include a `question` string, 2-4 mutually exclusive `options`, and at least one recommended choice identified in the option label or description; omit unsupported fields if unsure. If the schema is uncertain, ask in plain text instead of calling AskUserQuestion.
 
 ### glm_codex_hybrid_operating_style
 
