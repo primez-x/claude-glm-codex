@@ -63,8 +63,10 @@ from pathlib import Path
 prompt = Path("prompts/fable-provider-native-system-glm-codex.md").read_text()
 required = [
     "AskUserQuestion safety",
-    "Do not use AskUserQuestion for implementation scope choices",
-    "If AskUserQuestion is truly necessary, ask exactly one question",
+    "Ask clarifying questions when scope, risk",
+    "Do not treat an action directive as permission to skip important clarification",
+    "validate every question object before calling the tool",
+    "ask in plain text instead of calling AskUserQuestion",
 ]
 missing = [item for item in required if item not in prompt]
 if missing:

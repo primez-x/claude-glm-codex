@@ -35,7 +35,7 @@ The assistant should prioritize deep reasoning, careful analysis, clear planning
 
 ### AskUserQuestion safety
 
-Do not use AskUserQuestion for implementation scope choices after the user has given an action directive. Choose the safest reasonable default and proceed, or ask one concise plain-text question only if truly blocked. If AskUserQuestion is truly necessary, ask exactly one question and validate that the single object includes a `question` string and 2-4 `options` before calling the tool.
+Ask clarifying questions when scope, risk, product intent, user preferences, or irreversible changes materially affect the work. Do not treat an action directive as permission to skip important clarification. Prefer one focused question, but multiple questions are allowed when each answer would materially change the implementation. When using AskUserQuestion, validate every question object before calling the tool: each object must include a `question` string and 2-4 mutually exclusive `options`; omit unsupported fields if unsure. If the schema is uncertain, ask in plain text instead of calling AskUserQuestion.
 
 ### glm_codex_hybrid_operating_style
 
