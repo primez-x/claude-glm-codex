@@ -24,6 +24,74 @@ run_guard() {
   python3 "$repo_root/hooks/plan-mode-guard.py" <<<"$payload"
 }
 
+normal_spark_agent="$(
+  CLAUDE_GLM_CODEX_WRAPPER=1 run_guard "$(python3 - <<PY
+import json
+print(json.dumps({
+  "hook_event_name": "PreToolUse",
+  "transcript_path": "$not_plan_transcript",
+  "tool_name": "Agent",
+  "tool_input": {
+    "description": "Explore lane key tests",
+    "subagent_type": "spark-explorer",
+    "model": "opus",
+    "run_in_background": True,
+    "name": "lane_key_tests_explorer",
+    "prompt": "Read-only. Inspect tests and return concise findings. Do not edit.",
+  },
+}))
+PY
+)"
+)"
+python3 - "$normal_spark_agent" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+specific = data.get("hookSpecificOutput") or {}
+updated = specific.get("updatedInput") or {}
+if specific.get("permissionDecision") != "allow":
+    raise SystemExit("Named Spark Agent model normalization should be explicitly allowed")
+if updated.get("subagent_type") != "spark-explorer":
+    raise SystemExit(f"Named Spark Agent should keep subagent_type, got: {updated!r}")
+if updated.get("model") != "haiku":
+    raise SystemExit(f"Named Spark Agent must rewrite model=opus to model=haiku, got: {updated!r}")
+PY
+
+normal_mini_agent="$(
+  CLAUDE_GLM_CODEX_WRAPPER=1 run_guard "$(python3 - <<PY
+import json
+print(json.dumps({
+  "hook_event_name": "PreToolUse",
+  "transcript_path": "$not_plan_transcript",
+  "tool_name": "Agent",
+  "tool_input": {
+    "description": "Explore broad files",
+    "subagent_type": "mini-explorer",
+    "model": "opus",
+    "run_in_background": True,
+    "name": "broad_explorer",
+    "prompt": "Read-only broad sweep across many files. Do not edit.",
+  },
+}))
+PY
+)"
+)"
+python3 - "$normal_mini_agent" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+specific = data.get("hookSpecificOutput") or {}
+updated = specific.get("updatedInput") or {}
+if specific.get("permissionDecision") != "allow":
+    raise SystemExit("Named Mini Agent model normalization should be explicitly allowed")
+if updated.get("subagent_type") != "mini-explorer":
+    raise SystemExit(f"Named Mini Agent should keep subagent_type, got: {updated!r}")
+if "model" in updated:
+    raise SystemExit(f"Named Mini Agent should rely on custom-agent model, got: {updated!r}")
+PY
+
 agent_output="$(
   run_guard "$(python3 - <<PY
 import json

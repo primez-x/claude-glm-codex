@@ -83,6 +83,19 @@ def _mini_explorer_agent_type() -> str:
     return os.environ.get("CLAUDE_GLM_CODEX_MINI_EXPLORER_AGENT", "mini-explorer")
 
 
+SPARK_AGENT_TYPES = {
+    "spark-explorer",
+    "spark-formatter",
+    "spark-checker",
+    "spark-summarizer",
+}
+SONNET_AGENT_TYPES = {
+    "codex-worker",
+    "codex-reviewer",
+    "codex-verifier",
+}
+
+
 def _load_hook_input() -> dict[str, Any]:
     try:
         data = json.load(sys.stdin)
@@ -440,6 +453,39 @@ def _route_plan_agent(tool_input: dict[str, Any], cwd: Path | None) -> dict[str,
     return updated
 
 
+def _normalize_named_agent_model(tool_input: dict[str, Any]) -> dict[str, Any] | None:
+    """Keep explicit model overrides from defeating named agent routing."""
+    if not _is_glm_codex_session():
+        return None
+
+    agent_type = tool_input.get("subagent_type")
+    if not isinstance(agent_type, str):
+        return None
+
+    target_model: str | None
+    if agent_type in SPARK_AGENT_TYPES:
+        target_model = _spark_agent_model()
+    elif agent_type == _mini_explorer_agent_type():
+        target_model = None
+    elif agent_type in SONNET_AGENT_TYPES:
+        target_model = _explore_agent_model()
+    else:
+        return None
+
+    if target_model is None:
+        if "model" not in tool_input:
+            return None
+        updated = dict(tool_input)
+        updated.pop("model", None)
+        return updated
+
+    if tool_input.get("model") == target_model:
+        return None
+    updated = dict(tool_input)
+    updated["model"] = target_model
+    return updated
+
+
 def main() -> int:
     data = _load_hook_input()
     if data.get("hook_event_name") != "PreToolUse":
@@ -449,6 +495,8 @@ def main() -> int:
     tool_input = data.get("tool_input")
     if not isinstance(tool_name, str) or not isinstance(tool_input, dict):
         return 0
+
+    named_agent_input = _normalize_named_agent_model(tool_input) if tool_name == "Agent" else None
 
     if tool_name == "TaskOutput" and _task_id_is_agent_mailbox(tool_input.get("task_id")):
         return _deny(
@@ -462,11 +510,27 @@ def main() -> int:
 
     transcript_raw = data.get("transcript_path")
     if not isinstance(transcript_raw, str) or not transcript_raw:
+        if named_agent_input is not None:
+            return _allow(
+                "Normalized named GLM/Codex Agent model route.",
+                "Named agents must stay on their configured lane: Spark agents use "
+                "Haiku/Spark, Mini relies on its custom-agent model, and Codex "
+                "worker/reviewer/verifier agents use Sonnet/GPT-5.5.",
+                named_agent_input,
+            )
         return 0
     transcript_path = Path(transcript_raw).expanduser()
     plan_path, in_plan_mode = _read_latest_plan_state(transcript_path)
     in_read_only_sidechain = _transcript_is_read_only_sidechain(transcript_path)
     if not in_plan_mode and not in_read_only_sidechain:
+        if named_agent_input is not None:
+            return _allow(
+                "Normalized named GLM/Codex Agent model route.",
+                "Named agents must stay on their configured lane: Spark agents use "
+                "Haiku/Spark, Mini relies on its custom-agent model, and Codex "
+                "worker/reviewer/verifier agents use Sonnet/GPT-5.5.",
+                named_agent_input,
+            )
         return 0
 
     missing_args = _missing_required_tool_args(tool_name, tool_input)
@@ -489,6 +553,8 @@ def main() -> int:
 
     if tool_name == "Agent":
         routed_input = _route_plan_agent(tool_input, _cwd_from_hook(data)) if in_plan_mode else None
+        if routed_input is None:
+            routed_input = named_agent_input
         return _allow(
             "Plan/read-only context allows read-only Agent fanout.",
             "Use agents only for bounded evidence gathering. Do not call TaskOutput "
