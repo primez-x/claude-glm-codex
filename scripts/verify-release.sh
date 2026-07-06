@@ -51,7 +51,20 @@ except Exception as exc:
     raise SystemExit(f"PyYAML is required for release verification: {exc}")
 data = yaml.safe_load(Path("config/litellm/claude-glm-codex.yaml").read_text())
 names = [item.get("model_name") for item in data.get("model_list", []) if isinstance(item, dict)]
-required = {"glm-codex-hybrid", "fable", "opus", "glm-5.2", "gpt-5.5", "gpt-5.3-codex-spark", "sonnet", "haiku"}
+required = {
+    "glm-codex-hybrid",
+    "fable",
+    "opus",
+    "claude-opus-4-7",
+    "glm-5.2",
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.3-codex-spark",
+    "claude-sonnet-4-6",
+    "sonnet",
+    "haiku",
+}
 missing = sorted(required.difference(names))
 if missing:
     raise SystemExit(f"LiteLLM YAML missing required routes: {', '.join(missing)}")

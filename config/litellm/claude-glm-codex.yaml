@@ -55,6 +55,28 @@ model_list:
       max_input_tokens: 1000000
       hidden: true
 
+  - model_name: claude-opus-4-7
+    litellm_params:
+      model: os.environ/CLAUDE_GLM_UPSTREAM_OPUS_MODEL
+      api_base: os.environ/CLAUDE_GLM_UPSTREAM_BASE_URL
+      auth_token: os.environ/CLAUDE_GLM_UPSTREAM_AUTH_TOKEN
+    model_info:
+      mode: anthropic
+      max_input_tokens: 1000000
+      hidden: true
+      compatibility_alias_for: opus
+
+  - model_name: "claude-opus-4-7[1m]"
+    litellm_params:
+      model: os.environ/CLAUDE_GLM_UPSTREAM_OPUS_MODEL
+      api_base: os.environ/CLAUDE_GLM_UPSTREAM_BASE_URL
+      auth_token: os.environ/CLAUDE_GLM_UPSTREAM_AUTH_TOKEN
+    model_info:
+      mode: anthropic
+      max_input_tokens: 1000000
+      hidden: true
+      compatibility_alias_for: opus
+
   - model_name: "glm-5.2[1m]"
     litellm_params:
       model: os.environ/CLAUDE_GLM_UPSTREAM_OPUS_MODEL
@@ -85,6 +107,22 @@ model_list:
       mode: responses
       max_input_tokens: 272000
 
+  - model_name: gpt-5.4
+    litellm_params:
+      model: chatgpt/gpt-5.4
+      reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT
+    model_info:
+      mode: responses
+      max_input_tokens: 272000
+
+  - model_name: gpt-5.4-mini
+    litellm_params:
+      model: chatgpt/gpt-5.4-mini
+      reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT
+    model_info:
+      mode: responses
+      max_input_tokens: 272000
+
   - model_name: gpt-5.5-sonnet-4-6
     litellm_params:
       model: chatgpt/gpt-5.5
@@ -106,6 +144,26 @@ model_list:
       compatibility_alias_for: gpt-5.5
 
   - model_name: sonnet
+    litellm_params:
+      model: chatgpt/gpt-5.5
+      reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT
+    model_info:
+      mode: responses
+      max_input_tokens: 272000
+      hidden: true
+      compatibility_alias_for: gpt-5.5
+
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: chatgpt/gpt-5.5
+      reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT
+    model_info:
+      mode: responses
+      max_input_tokens: 272000
+      hidden: true
+      compatibility_alias_for: gpt-5.5
+
+  - model_name: "claude-sonnet-4-6[1m]"
     litellm_params:
       model: chatgpt/gpt-5.5
       reasoning_effort: os.environ/CLAUDE_GLM_CODEX_REASONING_EFFORT

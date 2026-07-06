@@ -202,10 +202,45 @@ specific = data.get("hookSpecificOutput") or {}
 updated = specific.get("updatedInput") or {}
 if specific.get("permissionDecision") != "allow":
     raise SystemExit("GLM-Codex large-context plan-mode Agent tool use should be explicitly allowed")
+if updated.get("subagent_type") != "mini-explorer":
+    raise SystemExit(f"GLM-Codex large-context scout should route to mini-explorer, got: {updated!r}")
+if "model" in updated:
+    raise SystemExit(f"GLM-Codex mini-explorer should rely on its configured model, got: {updated!r}")
+PY
+
+glm_codex_deep_agent="$(
+  CLAUDE_GLM_CODEX_WRAPPER=1 run_guard "$(python3 - <<PY
+import json
+print(json.dumps({
+  "hook_event_name": "PreToolUse",
+  "cwd": "$tmp_dir/repo",
+  "transcript_path": "$transcript",
+  "tool_name": "Agent",
+  "tool_input": {
+    "description": "Explore architecture judgment and deep reasoning",
+    "subagent_type": "spark-explorer",
+    "model": "haiku",
+    "run_in_background": True,
+    "name": "glm_codex_architecture_scout",
+    "prompt": "Read-only architecture judgment and deep reasoning across several modules. Do not edit. Return concise findings.",
+  },
+}))
+PY
+)"
+)"
+python3 - "$glm_codex_deep_agent" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+specific = data.get("hookSpecificOutput") or {}
+updated = specific.get("updatedInput") or {}
+if specific.get("permissionDecision") != "allow":
+    raise SystemExit("GLM-Codex deep plan-mode Agent tool use should be explicitly allowed")
 if updated.get("subagent_type") != "Explore":
-    raise SystemExit(f"GLM-Codex large-context scout should stay on Explore, got: {updated!r}")
+    raise SystemExit(f"GLM-Codex deep scout should route to Explore, got: {updated!r}")
 if updated.get("model") != "sonnet":
-    raise SystemExit(f"GLM-Codex large-context scout must use Agent schema alias sonnet, got: {updated!r}")
+    raise SystemExit(f"GLM-Codex deep scout must use Agent schema alias sonnet, got: {updated!r}")
 PY
 
 readonly_bash="$(
@@ -238,6 +273,61 @@ if specific.get("permissionDecision") != "allow":
     raise SystemExit("Plan-mode read-only Bash should be explicitly allowed")
 PY
 
+missing_bash_args="$(
+  run_guard "$(python3 - <<PY
+import json
+print(json.dumps({
+  "hook_event_name": "PreToolUse",
+  "cwd": "$tmp_dir/repo",
+  "transcript_path": "$transcript",
+  "tool_name": "Bash",
+  "tool_input": {},
+}))
+PY
+)"
+)"
+python3 - "$missing_bash_args" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+specific = data.get("hookSpecificOutput") or {}
+reason = specific.get("permissionDecisionReason", "")
+context = specific.get("additionalContext", "")
+if specific.get("permissionDecision") != "deny":
+    raise SystemExit("Plan-mode Bash without command should be denied")
+if "missing required argument" not in reason:
+    raise SystemExit(f"Missing-argument denial should name the schema issue, got: {reason!r}")
+if "Spark tool-call failure" not in context:
+    raise SystemExit(f"Missing-argument denial should direct Spark fallback, got: {context!r}")
+PY
+
+readonly_bash_devnull="$(
+  run_guard "$(python3 - <<PY
+import json
+print(json.dumps({
+  "hook_event_name": "PreToolUse",
+  "cwd": "$tmp_dir/repo",
+  "transcript_path": "$transcript",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "find $tmp_dir/repo -maxdepth 2 -type f 2>/dev/null | xargs grep -l 'lane' 2>/dev/null | head -20",
+    "description": "Read-only command with stderr suppression",
+  },
+}))
+PY
+)"
+)"
+python3 - "$readonly_bash_devnull" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+specific = data.get("hookSpecificOutput") or {}
+if specific.get("permissionDecision") != "allow":
+    raise SystemExit("Plan-mode read-only Bash with /dev/null redirection should be allowed")
+PY
+
 mutating_bash="$(
   run_guard "$(python3 - <<PY
 import json
@@ -263,6 +353,29 @@ data = json.loads(sys.argv[1])
 specific = data.get("hookSpecificOutput") or {}
 if specific.get("permissionDecision") != "deny":
     raise SystemExit("Plan-mode mutating Bash should be denied")
+PY
+
+mutating_bash_redirect="$(
+  run_guard "$(python3 - <<PY
+import json
+print(json.dumps({
+  "hook_event_name": "PreToolUse",
+  "cwd": "$tmp_dir/repo",
+  "transcript_path": "$transcript",
+  "tool_name": "Bash",
+  "tool_input": {"command": "rg lane $tmp_dir/repo > $tmp_dir/repo/report.txt"},
+}))
+PY
+)"
+)"
+python3 - "$mutating_bash_redirect" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+specific = data.get("hookSpecificOutput") or {}
+if specific.get("permissionDecision") != "deny":
+    raise SystemExit("Plan-mode Bash output redirection to files should be denied")
 PY
 
 task_output="$(

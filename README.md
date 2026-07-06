@@ -9,7 +9,7 @@ This repo intentionally ships templates, launchers, hooks, prompts, and verifica
 - `bin/claude-glm-codex` - Claude Code launcher for the hybrid GLM/Codex workflow.
 - `bin/claude-glm-codex-litellm` - LiteLLM gateway bootstrapper used by the launcher.
 - `config/litellm/claude-glm-codex.yaml` - sanitized LiteLLM model routes.
-- `config/claude/agents.json` - Spark and GPT-5.5 agents for exploration, formatting, checking, summarization, implementation, review, and verification.
+- `config/claude/agents.json` - Spark, GPT-5.4-mini, and GPT-5.5 agents for exploration, formatting, checking, summarization, implementation, review, and verification.
 - `config/python/sitecustomize.py` - LiteLLM compatibility shim for ChatGPT Responses system-message handling, advisor streaming, and cross-model advisor routing.
 - `prompts/fable-provider-native-system-glm-codex.md` - provider-native GLM/Codex system prompt.
 - `prompts/claude-glm-codex-subagents.md` - appended delegation policy for agents and advisor routing.
@@ -49,7 +49,7 @@ The installer copies launchers into `~/.local/bin`, installs the LiteLLM config 
 
 ## Model Routing
 
-The main thread defaults to GLM through the Opus slot. GPT-5.5 is exposed through Sonnet-style routes for heavier Codex delegation. GPT-5.3 Codex Spark is exposed through Haiku-style routes for cheap bounded work.
+The main thread defaults to GLM through the Opus slot. GPT-5.5 is exposed through Sonnet-style routes for heavier Codex delegation. GPT-5.3 Codex Spark is exposed through Haiku-style routes for the fastest bounded work. GPT-5.4-mini remains available as an explicit route and as `mini-explorer`, which can fan out multiple Spark scouts for broader read-only exploration or take over when a Spark slice fails tool-call validation.
 
 The visible smart advisor route is `glm-codex-hybrid`; legacy `fable` aliases are kept hidden for compatibility. With the hybrid advisor selected, GLM executor calls are advised by GPT-5.5, while GPT/Spark executor calls are advised by GLM. Explicit advisor selections such as `sonnet`, `haiku`, or `opus` are honored.
 

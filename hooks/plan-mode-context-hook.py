@@ -14,7 +14,7 @@ PLAN_MODE_CONTEXT = """Plan-mode operating contract:
 Agent collection:
 - Read-only Agent fanout is allowed for bounded evidence gathering.
 - Use Spark first for bounded read-only exploration that fits its 128K text context: tiny file reads, rg/file maps, symbol lookup, log slices, quick summaries, simple checks, and most scoped scout tasks.
-- Use the GPT-5.4 Mini Explore fallback only for large files, broad/very thorough sweeps, many files, or cross-module research that may exceed Spark's context.
+- Use `mini-explorer` (GPT-5.4 Mini) when a broad read-only scope should split into multiple Spark scouts, when many files may exceed Spark's context, or when Spark reports a tool-call/schema failure.
 - Do not call TaskOutput for Agent mailbox names or agent_id values. Agent results arrive in the parent transcript as <agent-result> or <task-notification> blocks.
 - If an agent result has not arrived, continue with available evidence or state the missing input; do not retry TaskOutput by guessing IDs.
 

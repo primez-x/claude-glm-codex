@@ -12,6 +12,12 @@ from typing import Any
 
 
 MUTATING_FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+REQUIRED_TOOL_ARGS = {
+    "Bash": ("command",),
+    "Glob": ("pattern",),
+    "Grep": ("pattern",),
+    "Read": ("file_path",),
+}
 MUTATING_BASH_PATTERNS = (
     r"\bapply_patch\b",
     r"\b(?:chmod|chown|cp|install|ln|mkdir|mv|rm|rmdir|touch)\b",
@@ -38,7 +44,7 @@ MUTATING_SCRIPT_PATTERNS = (
     r"\bos\.(?:makedirs|mkdir|remove|rename|replace|rmdir|unlink)\s*\(",
     r"\bshutil\.(?:copy|copy2|copyfile|copytree|move|rmtree)\s*\(",
 )
-OUTPUT_REDIRECT_RE = re.compile(r"(^|[\s;])(?:&>|(?:\d+)?>>?)(?!&)")
+OUTPUT_REDIRECT_RE = re.compile(r"(^|[\s;])(?:&>|(?:\d+)?>>?)(?!&|\s*/dev/null\b)")
 SPARK_CONTEXT_MAX_BYTES = int(os.environ.get("CLAUDE_CODEX_SPARK_CONTEXT_MAX_BYTES", "524288"))
 PATH_TOKEN_RE = re.compile(
     r"(?:~|\.{1,2}|/|[A-Za-z0-9_-])[\w./*-]*"
@@ -71,6 +77,10 @@ def _explore_agent_model() -> str:
     if explicit:
         return explicit
     return "sonnet" if _is_glm_codex_session() else "gpt-5.4-mini"
+
+
+def _mini_explorer_agent_type() -> str:
+    return os.environ.get("CLAUDE_GLM_CODEX_MINI_EXPLORER_AGENT", "mini-explorer")
 
 
 def _load_hook_input() -> dict[str, Any]:
@@ -288,6 +298,15 @@ def _task_id_is_agent_mailbox(task_id: Any) -> bool:
     return isinstance(task_id, str) and "@session-" in task_id
 
 
+def _missing_required_tool_args(tool_name: str, tool_input: dict[str, Any]) -> list[str]:
+    missing = []
+    for key in REQUIRED_TOOL_ARGS.get(tool_name, ()):
+        value = tool_input.get(key)
+        if not isinstance(value, str) or not value:
+            missing.append(key)
+    return missing
+
+
 def _agent_text(tool_input: dict[str, Any]) -> str:
     fields = []
     for key in ("description", "name", "prompt", "subagent_type", "model"):
@@ -367,11 +386,25 @@ def _agent_prompt_needs_large_context(tool_input: dict[str, Any], cwd: Path | No
             "many files",
             "multiple directories",
             "cross-module",
-            "architecture judgment",
-            "deep reasoning",
             "exceeds spark",
             "over 128k",
             "over 128 k",
+        )
+    )
+
+
+def _agent_prompt_needs_sonnet_explore(tool_input: dict[str, Any]) -> bool:
+    text = _agent_text(tool_input)
+    return any(
+        signal in text
+        for signal in (
+            "architecture judgment",
+            "deep reasoning",
+            "adversarial",
+            "review",
+            "implementation",
+            "refactor",
+            "security",
         )
     )
 
@@ -380,14 +413,30 @@ def _route_plan_agent(tool_input: dict[str, Any], cwd: Path | None) -> dict[str,
     if not _agent_prompt_is_read_only(tool_input):
         return None
 
-    target_type = "Explore" if _agent_prompt_needs_large_context(tool_input, cwd) else "spark-explorer"
-    target_model = _spark_agent_model() if target_type == "spark-explorer" else _explore_agent_model()
-    if tool_input.get("subagent_type") == target_type and tool_input.get("model") == target_model:
+    target_type = "spark-explorer"
+    target_model: str | None = _spark_agent_model()
+    if _agent_prompt_needs_sonnet_explore(tool_input):
+        target_type = "Explore"
+        target_model = _explore_agent_model()
+    elif _agent_prompt_needs_large_context(tool_input, cwd):
+        if _is_glm_codex_session():
+            target_type = _mini_explorer_agent_type()
+            target_model = None
+        else:
+            target_type = "Explore"
+            target_model = _explore_agent_model()
+
+    if tool_input.get("subagent_type") == target_type and (
+        target_model is None or tool_input.get("model") == target_model
+    ):
         return None
 
     updated = dict(tool_input)
     updated["subagent_type"] = target_type
-    updated["model"] = target_model
+    if target_model is None:
+        updated.pop("model", None)
+    else:
+        updated["model"] = target_model
     return updated
 
 
@@ -419,6 +468,16 @@ def main() -> int:
     in_read_only_sidechain = _transcript_is_read_only_sidechain(transcript_path)
     if not in_plan_mode and not in_read_only_sidechain:
         return 0
+
+    missing_args = _missing_required_tool_args(tool_name, tool_input)
+    if missing_args:
+        return _deny(
+            f"{tool_name} tool call is missing required argument(s): {', '.join(missing_args)}.",
+            "Do not retry the same empty or schema-invalid tool call. If this is a "
+            "Spark/Haiku scout, stop that scout and report: Spark tool-call failure; "
+            "retry this bounded slice with mini-explorer/gpt-5.4-mini or handle it "
+            "locally with valid tool arguments.",
+        )
 
     if in_plan_mode and tool_name == "TaskOutput":
         return _deny(

@@ -51,12 +51,23 @@ except Exception as exc:
 
 config = yaml.safe_load(Path(os.environ["CONFIG"]).read_text())
 names = [item.get("model_name") for item in config.get("model_list", []) if isinstance(item, dict)]
-required = {"glm-codex-hybrid", "opus", "gpt-5.5", "gpt-5.3-codex-spark", "sonnet", "haiku"}
+required = {
+    "glm-codex-hybrid",
+    "opus",
+    "claude-opus-4-7",
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.3-codex-spark",
+    "claude-sonnet-4-6",
+    "sonnet",
+    "haiku",
+}
 missing = sorted(required.difference(names))
 if missing:
     raise SystemExit(f"FAIL: LiteLLM config missing routes: {', '.join(missing)}")
 agents = json.loads(Path(os.environ["AGENTS"]).read_text())
-required_agents = {"spark-explorer", "spark-formatter", "spark-checker", "spark-summarizer", "codex-worker", "codex-reviewer", "codex-verifier"}
+required_agents = {"spark-explorer", "mini-explorer", "spark-formatter", "spark-checker", "spark-summarizer", "codex-worker", "codex-reviewer", "codex-verifier"}
 missing_agents = sorted(required_agents.difference(agents))
 if missing_agents:
     raise SystemExit(f"FAIL: agents file missing agents: {', '.join(missing_agents)}")

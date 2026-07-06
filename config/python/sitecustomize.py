@@ -210,6 +210,10 @@ def _install_cross_model_advisor_patch() -> None:
             or normalized.startswith("gpt-5.3-codex")
         )
 
+    def is_mini_alias(model: str) -> bool:
+        normalized = normalized_model_name(model)
+        return normalized.startswith("gpt-5.4-mini")
+
     def is_sonnet_alias(model: str) -> bool:
         normalized = normalized_model_name(model)
         return (
@@ -256,13 +260,23 @@ def _install_cross_model_advisor_patch() -> None:
                 "CLAUDE_GLM_CODEX_SPARK_ADVISOR_MODEL",
                 "chatgpt/gpt-5.3-codex-spark",
             )
+        elif is_mini_alias(model):
+            updated["model"] = os.environ.get(
+                "CLAUDE_GLM_CODEX_MINI_ADVISOR_MODEL",
+                "chatgpt/gpt-5.4-mini",
+            )
         else:
             updated["model"] = os.environ.get(
                 "CLAUDE_GLM_CODEX_SONNET_ADVISOR_MODEL",
                 "chatgpt/gpt-5.5",
             )
 
-        if normalized.startswith("chatgpt/") or is_spark_alias(model) or is_sonnet_alias(model):
+        if (
+            normalized.startswith("chatgpt/")
+            or is_spark_alias(model)
+            or is_mini_alias(model)
+            or is_sonnet_alias(model)
+        ):
             updated.pop("api_base", None)
             updated.pop("api_key", None)
         return updated
@@ -273,7 +287,12 @@ def _install_cross_model_advisor_patch() -> None:
             return dict(tool)
         if is_glm_alias(model):
             return apply_glm_route(tool, model)
-        if is_chatgpt_route(model) or is_spark_alias(model) or is_sonnet_alias(model):
+        if (
+            is_chatgpt_route(model)
+            or is_spark_alias(model)
+            or is_mini_alias(model)
+            or is_sonnet_alias(model)
+        ):
             return apply_chatgpt_route(tool, model)
         return dict(tool)
 
