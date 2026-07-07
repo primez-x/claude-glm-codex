@@ -44,6 +44,39 @@ print("JSON config parsed")
 PY
 
 python3 <<'PY'
+import json
+from pathlib import Path
+
+advisor_guard = (
+    "Do not call an `advisor` or `Advisor` tool unless that exact tool is visible "
+    "in the current thread's available tools."
+)
+advisor_fallback = "If no Advisor tool is available, run a local adversarial self-review instead"
+edit_guard = "Do not run `apply_patch` from Bash; use Claude Code Edit, MultiEdit, or Write tools"
+
+for path in (
+    Path("prompts/fable-provider-native-system-glm-codex.md"),
+    Path("prompts/claude-glm-codex-subagents.md"),
+):
+    text = path.read_text()
+    missing = [item for item in (advisor_guard, advisor_fallback, edit_guard) if item not in text]
+    if missing:
+        raise SystemExit(f"{path} missing prompt safety text: {missing!r}")
+
+agents = json.loads(Path("config/claude/agents.json").read_text())
+for name in ("codex-worker", "codex-reviewer", "codex-verifier"):
+    prompt = agents[name]["prompt"]
+    missing = [item for item in (advisor_guard, advisor_fallback) if item not in prompt]
+    if missing:
+        raise SystemExit(f"{name} prompt missing Advisor availability guard: {missing!r}")
+for name in ("codex-worker", "spark-formatter"):
+    prompt = agents[name]["prompt"]
+    if edit_guard not in prompt:
+        raise SystemExit(f"{name} prompt missing Claude edit-tool guard")
+print("Agent Advisor/edit prompt guards present")
+PY
+
+python3 <<'PY'
 from pathlib import Path
 try:
     import yaml
